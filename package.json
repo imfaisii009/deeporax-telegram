@@ -36,7 +36,8 @@
   },
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json",
+    "smoke": "bun scripts/smoke.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
     "check": "bun run typecheck && bun run lint && bun run build && publint && attw --pack .",
