@@ -45,7 +45,10 @@ export function splitHtml(markup: string, limit: number): string[] {
   let cands: Array<Candidate | undefined> = [undefined, undefined, undefined];
 
   const cut = () => {
-    const best = cands.find((c) => c !== undefined);
+    // A break that leaves a tiny chunk is skipped; with none eligible, the latest break wins.
+    const found = cands.filter((c): c is Candidate => c !== undefined);
+    const best =
+      found.find((c) => c.len >= Math.floor(limit / 2)) ?? found.sort((a, c) => c.pos - a.pos)[0];
     if (best) {
       chunks.push(cur.slice(0, best.pos) + closeAll(best.stack));
       const prefix = reopen(best.stack);
