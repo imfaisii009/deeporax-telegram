@@ -1,7 +1,7 @@
 import type { ResponseParameters } from "@grammyjs/types";
 import { redact, TelegramError } from "./errors.js";
 import type { EventSink } from "./events.js";
-import type { Pacer } from "./pacing.js";
+import { type Pacer, sleep } from "./pacing.js";
 import { buildBody } from "./payload.js";
 import type { SafeStore } from "./store.js";
 
@@ -42,24 +42,27 @@ interface ApiResponse {
   parameters?: ResponseParameters;
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const backoff = (attempt: number) =>
   Math.min(10_000, 500 * 2 ** (attempt - 1)) * (0.5 + Math.random() * 0.5);
 
 export function createCaller(config: RequestConfig): Caller {
   const { token, testEnvironment, retry, pace, emit, store } = config;
   const apiRoot = config.apiRoot.replace(/\/$/, "");
-  // old chat id -> new id, or null when the store has no mapping (read once per process).
-  const migrations = new Map<string, number | null>();
+  // old chat id -> new id, or null when the store has no mapping. Holds the in-flight promise
+  // so concurrent first calls share one store read.
+  const migrations = new Map<string, Promise<number | null>>();
 
   const resolveChat = async (chatId: unknown): Promise<unknown> => {
     const key = String(chatId);
-    if (!migrations.has(key)) {
-      const stored = await store.get(`migrated:${key}`);
-      const next = stored === null ? Number.NaN : Number(stored);
-      migrations.set(key, Number.isFinite(next) ? next : null);
+    let lookup = migrations.get(key);
+    if (!lookup) {
+      lookup = store.get(`migrated:${key}`).then((stored) => {
+        const next = stored === null ? Number.NaN : Number(stored);
+        return Number.isFinite(next) ? next : null;
+      });
+      migrations.set(key, lookup);
     }
-    return migrations.get(key) ?? chatId;
+    return (await lookup) ?? chatId;
   };
 
   return async (method, args, init) => {
@@ -74,7 +77,17 @@ export function createCaller(config: RequestConfig): Caller {
     const chatId = callArgs?.chat_id as number | string | undefined;
 
     // Paced once per call: 429 waits and backoff already space the retries.
-    await pace(method, chatId);
+    const aborted = () => new TelegramError(method, 0, "aborted");
+    try {
+      await pace(method, chatId, init?.signal);
+    } catch {
+      // The pacer only rejects when the caller's signal aborts.
+      throw aborted();
+    }
+    const nap = (ms: number) =>
+      sleep(ms, init?.signal).catch(() => {
+        throw aborted();
+      });
 
     let payload = await buildBody(callArgs, config.fetch);
     let migrated = false;
@@ -82,6 +95,7 @@ export function createCaller(config: RequestConfig): Caller {
 
     // Only the retry paths advance `attempt`; a migration replays the same one.
     for (let attempt = 1; attempt <= retry.attempts; ) {
+      if (init?.signal?.aborted) throw aborted();
       const hasMore = attempt < retry.attempts;
       const controller = new AbortController();
       let timedOut = false;
@@ -104,14 +118,14 @@ export function createCaller(config: RequestConfig): Caller {
         });
         text = await res.text();
       } catch (err) {
-        if (init?.signal?.aborted) throw new TelegramError(method, 0, "aborted");
+        if (init?.signal?.aborted) throw aborted();
         const description = timedOut
           ? `timed out after ${timeoutMs}ms`
           : `network error: ${redact(String((err as Error)?.message ?? err), token)}`;
         const error = new TelegramError(method, 0, description);
         if (retry.onNetworkError && hasMore) {
           emit({ type: "retry", method, attempt, error });
-          await sleep(backoff(attempt));
+          await nap(backoff(attempt));
           attempt++;
           continue;
         }
@@ -141,7 +155,7 @@ export function createCaller(config: RequestConfig): Caller {
         const wait = body.parameters.retry_after;
         if (wait <= retry.maxRetryAfterSec && hasMore) {
           emit({ type: "rate_limited", method, attempt, ms: wait * 1000, error });
-          await sleep(wait * 1000);
+          await nap(wait * 1000);
           attempt++;
           continue;
         }
@@ -152,7 +166,7 @@ export function createCaller(config: RequestConfig): Caller {
       if (newChatId !== undefined && !migrated && chatId !== undefined) {
         migrated = true;
         await store.put(`migrated:${chatId}`, String(newChatId));
-        migrations.set(String(chatId), newChatId);
+        migrations.set(String(chatId), Promise.resolve(newChatId));
         emit({ type: "migrated", method, chatId, error });
         payload = await buildBody({ ...callArgs, chat_id: newChatId }, config.fetch);
         callArgs = { ...callArgs, chat_id: newChatId };
@@ -161,7 +175,7 @@ export function createCaller(config: RequestConfig): Caller {
 
       if (code >= 500 && hasMore) {
         emit({ type: "retry", method, attempt, error });
-        await sleep(backoff(attempt));
+        await nap(backoff(attempt));
         attempt++;
         continue;
       }

@@ -4,14 +4,14 @@ export interface PacingLimits {
   globalPerSec: number;
 }
 
-// ponytail: limits from memory of the Bots FAQ, verify
+// Limits per Telegram's Bots FAQ (checked 2026-11-26 via grammY's flood docs, which quote it): 1 msg/s per chat, 20 msg/min per group, ~30 msg/s for bulk sends.
 export const DEFAULT_PACING: PacingLimits = {
   perChatPerSec: 1,
   perGroupPerMin: 20,
   globalPerSec: 30,
 };
 
-export type Pacer = (method: string, chatId: unknown) => Promise<void>;
+export type Pacer = (method: string, chatId: unknown, signal?: AbortSignal) => Promise<void>;
 
 const PACED = /^(send(?!ChatAction)|copyMessages?|forwardMessages?)/;
 const MAX_BUCKETS = 1000;
@@ -45,7 +45,21 @@ class Bucket {
   }
 }
 
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+// Rejects as soon as `signal` aborts; the timer and listener never outlive the sleep.
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("aborted"));
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("aborted"));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
 
 export function createPacer(limits: PacingLimits | false): Pacer {
   if (limits === false) return async () => {};
@@ -71,10 +85,10 @@ export function createPacer(limits: PacingLimits | false): Pacer {
     return bucket;
   };
 
-  return async (method, chatId) => {
+  return async (method, chatId, signal) => {
     if (!PACED.test(method)) return;
     const hasChat = typeof chatId === "number" || (typeof chatId === "string" && chatId !== "");
     const wait = Math.max(global.reserve(), hasChat ? chatBucket(chatId).reserve() : 0);
-    if (wait > 0) await sleep(wait);
+    if (wait > 0) await sleep(wait, signal);
   };
 }
