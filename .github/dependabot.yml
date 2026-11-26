@@ -7,6 +7,10 @@ updates:
     allow:
       - dependency-name: "@grammyjs/types"
       - dependency-type: development
+    # TypeScript 7 breaks tsup's dts build, so stay on ^6.
+    ignore:
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         dependency-type: development
