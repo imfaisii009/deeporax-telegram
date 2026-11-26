@@ -45,6 +45,7 @@ export {
 } from "./html.js";
 export type { InputFileData } from "./input-file.js";
 export { InputFile } from "./input-file.js";
+export type { Poller, PollOptions, WebhookHandler, WebhookOptions } from "./receive.js";
 export type {
   AlbumContent,
   MediaContent,

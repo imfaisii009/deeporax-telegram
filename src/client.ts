@@ -1,9 +1,18 @@
+import type { CallbackQuery, Message } from "@grammyjs/types";
 import { type Alert, type AlerterConfig, createAlerter } from "./alerter.js";
 import { type Api, createApi } from "./api.js";
 import { createEmitter, type EventSink } from "./events.js";
 import { createPacer, DEFAULT_PACING, type PacingLimits } from "./pacing.js";
+import {
+  createPoll,
+  createWebhook,
+  type Poller,
+  type PollOptions,
+  type WebhookHandler,
+  type WebhookOptions,
+} from "./receive.js";
 import { createCaller, type RetryOptions } from "./request.js";
-import { createSend, type SendFn } from "./send.js";
+import { createSend, type SendContent, type SendFn, type SendOptions } from "./send.js";
 import { createSafeStore, memoryStore, type Store } from "./store.js";
 import { createTopics, type Topics } from "./topics.js";
 
@@ -28,6 +37,14 @@ export interface Telegram {
   readonly topics: Topics;
   readonly send: SendFn;
   alerter<R extends string>(config: AlerterConfig<R>): Alert<R>;
+  webhook(options: WebhookOptions): WebhookHandler;
+  poll(options: PollOptions): Poller;
+  answer(
+    query: CallbackQuery,
+    text?: string,
+    options?: { showAlert?: boolean; url?: string },
+  ): Promise<true>;
+  reply(message: Message, content: SendContent, options?: SendOptions): Promise<Message[]>;
 }
 
 export function createTelegram(options: TelegramOptions = {}): Telegram {
@@ -78,11 +95,30 @@ export function createTelegram(options: TelegramOptions = {}): Telegram {
   });
 
   const enabled = token !== "";
-  return {
+  const tg: Telegram = {
     enabled,
     api,
     topics,
     send,
     alerter: (config) => createAlerter({ enabled, send, store, emit }, config),
+    webhook: (o) => createWebhook(tg, emit, o),
+    poll: (o) => createPoll(tg, emit, o),
+    answer: (query, text, o) =>
+      api.answerCallbackQuery({
+        callback_query_id: query.id,
+        text,
+        show_alert: o?.showAlert,
+        url: o?.url,
+      }),
+    reply: (message, content, o) =>
+      send(
+        {
+          chat: message.chat.id,
+          topic: message.is_topic_message ? message.message_thread_id : undefined,
+        },
+        content,
+        { ...o, replyTo: message.message_id },
+      ),
   };
+  return tg;
 }
