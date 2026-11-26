@@ -162,19 +162,32 @@ export function createTopics(deps: {
     },
 
     async heal(chat, name, failedId, error, options) {
-      if (isTopicClosed(error)) {
-        await api.reopenForumTopic({ chat_id: chat, message_thread_id: failedId });
-        emit({
-          type: "topic_healed",
-          chatId: chat,
-          topic: name,
-          threadId: failedId,
-          detail: "reopened",
-          error,
-        });
-        return failedId;
-      }
       const key = memKey(chat, name);
+      if (isTopicClosed(error)) {
+        return shared(`reopen:${key}`, async () => {
+          try {
+            await api.reopenForumTopic({ chat_id: chat, message_thread_id: failedId });
+          } catch (e) {
+            // A concurrent or earlier reopen already did the job.
+            if (!(e instanceof TelegramError && /TOPIC_NOT_MODIFIED/i.test(e.description))) throw e;
+          }
+          emit({
+            type: "topic_healed",
+            chatId: chat,
+            topic: name,
+            threadId: failedId,
+            detail: "reopened",
+            error,
+          });
+          return failedId;
+        });
+      }
+      // An in-flight ensure may resolve to the very id that just failed, so its result is not proof of a heal.
+      const pending = inFlight.get(key);
+      if (pending) {
+        const id = await pending;
+        if (id !== failedId) return id;
+      }
       return shared(key, async () => {
         // Another caller may have healed between the failure and this call.
         const current = memory.get(key);
