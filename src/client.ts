@@ -2,6 +2,7 @@ import { type Api, createApi } from "./api.js";
 import { createEmitter, type EventSink } from "./events.js";
 import { createPacer, DEFAULT_PACING, type PacingLimits } from "./pacing.js";
 import { createCaller, type RetryOptions } from "./request.js";
+import { createSend, type SendFn } from "./send.js";
 import { createSafeStore, memoryStore, type Store } from "./store.js";
 import { createTopics, type Topics } from "./topics.js";
 
@@ -24,6 +25,7 @@ export interface Telegram {
   readonly enabled: boolean;
   readonly api: Api;
   readonly topics: Topics;
+  readonly send: SendFn;
 }
 
 export function createTelegram(options: TelegramOptions = {}): Telegram {
@@ -66,5 +68,12 @@ export function createTelegram(options: TelegramOptions = {}): Telegram {
   const api = createApi(call);
   const topics = createTopics({ api, store, emit, pinned: options.topics?.ids });
 
-  return { enabled: token !== "", api, topics };
+  const send = createSend({
+    api,
+    topics,
+    emit,
+    plainFallback: options.plainFallback ?? true,
+  });
+
+  return { enabled: token !== "", api, topics, send };
 }
