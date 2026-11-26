@@ -1,0 +1,7 @@
+# Internal design notes name private projects; keep them out of the public repo.
+docs/specs/
+docs/plans/
+node_modules/
+dist/
+.env
+*.tgz
