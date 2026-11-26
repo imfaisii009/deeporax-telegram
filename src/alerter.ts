@@ -14,7 +14,7 @@ export interface AlerterConfig<R extends string> {
   chat: ChatId;
   routes: Record<R, AlertRoute>;
   dedupe?: { windowSec: number };
-  fallbackRoute?: R;
+  fallbackRoute?: NoInfer<R>;
 }
 export interface AlertOptions {
   key?: string;

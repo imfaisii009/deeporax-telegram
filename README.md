@@ -55,7 +55,7 @@ export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const tg = createTelegram({ token: env.TELEGRAM_BOT_TOKEN, store: env.TELEGRAM_KV });
     const CHAT_ID = Number(env.TELEGRAM_CHAT_ID);
-    const alert = tg.alerter<"errors" | "general">({
+    const alert = tg.alerter({
       chat: CHAT_ID,
       routes: { errors: { topic: "Errors" }, general: {} },
       dedupe: { windowSec: 600 },
@@ -179,7 +179,7 @@ import { createTelegram, html, code } from "@deeporax/telegram";
 const tg = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
 const CHAT_ID = Number(process.env.TELEGRAM_CHAT_ID);
 
-const alert = tg.alerter<"errors" | "signups" | "general">({
+const alert = tg.alerter({
   chat: CHAT_ID,
   routes: {
     errors: { topic: "Errors", iconColor: 0xfb6f5f },
@@ -195,8 +195,6 @@ const result = await alert("errors", html`Upstream 503 on ${code("/api/pay")}`, 
 });
 if (!result.ok) console.log(result.skipped ?? result.error);
 ```
-
-Name the route union as the type argument when you set `fallbackRoute`, as above. Otherwise TypeScript infers the route names from `fallbackRoute` alone.
 
 The result is `{ ok: true, messages }` or `{ ok: false, skipped?: "disabled" | "deduped", error? }`.
 
