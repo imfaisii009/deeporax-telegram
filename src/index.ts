@@ -40,3 +40,4 @@ export type { InputFileData } from "./input-file.js";
 export { InputFile } from "./input-file.js";
 export type { Store } from "./store.js";
 export { memoryStore } from "./store.js";
+export type { ChatId, IconColor, TopicOptions, Topics } from "./topics.js";
