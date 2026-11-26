@@ -6,6 +6,13 @@ export type {
   Update,
   User,
 } from "@grammyjs/types";
+export type {
+  Alert,
+  AlerterConfig,
+  AlertOptions,
+  AlertResult,
+  AlertRoute,
+} from "./alerter.js";
 export type { Api } from "./api.js";
 export type { Buttons } from "./buttons.js";
 export { button, keyboard } from "./buttons.js";

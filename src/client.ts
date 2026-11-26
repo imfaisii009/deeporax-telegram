@@ -1,3 +1,4 @@
+import { type Alert, type AlerterConfig, createAlerter } from "./alerter.js";
 import { type Api, createApi } from "./api.js";
 import { createEmitter, type EventSink } from "./events.js";
 import { createPacer, DEFAULT_PACING, type PacingLimits } from "./pacing.js";
@@ -26,6 +27,7 @@ export interface Telegram {
   readonly api: Api;
   readonly topics: Topics;
   readonly send: SendFn;
+  alerter<R extends string>(config: AlerterConfig<R>): Alert<R>;
 }
 
 export function createTelegram(options: TelegramOptions = {}): Telegram {
@@ -75,5 +77,12 @@ export function createTelegram(options: TelegramOptions = {}): Telegram {
     plainFallback: options.plainFallback ?? true,
   });
 
-  return { enabled: token !== "", api, topics, send };
+  const enabled = token !== "";
+  return {
+    enabled,
+    api,
+    topics,
+    send,
+    alerter: (config) => createAlerter({ enabled, send, store, emit }, config),
+  };
 }
