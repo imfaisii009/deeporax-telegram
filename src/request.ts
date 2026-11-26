@@ -56,7 +56,11 @@ export function createCaller(config: RequestConfig): Caller {
 
   const resolveChat = async (chatId: unknown): Promise<unknown> => {
     // Only basic groups migrate; supergroups/channels are <= -1e12, private chats positive.
-    if (typeof chatId !== "number" || chatId >= 0 || chatId <= -1_000_000_000_000) return chatId;
+    // Ids often arrive as strings from env, so classify by numeric value.
+    const n = typeof chatId === "string" && chatId.trim() !== "" ? Number(chatId) : chatId;
+    if (typeof n !== "number" || !Number.isInteger(n) || n >= 0 || n <= -1_000_000_000_000) {
+      return chatId;
+    }
     const key = String(chatId);
     let lookup = migrations.get(key);
     if (!lookup) {
