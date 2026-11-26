@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.json",
+  "include": ["scripts"],
+  "compilerOptions": { "types": ["bun"], "noEmit": true, "allowImportingTsExtensions": true }
+}
