@@ -11,7 +11,7 @@ import {
   type WebhookHandler,
   type WebhookOptions,
 } from "./receive.js";
-import { createCaller, type RetryOptions } from "./request.js";
+import { createCaller, type FetchLike, type RetryOptions } from "./request.js";
 import { createSend, type SendContent, type SendFn, type SendOptions } from "./send.js";
 import { createSafeStore, memoryStore, type Store } from "./store.js";
 import { createTopics, type Topics } from "./topics.js";
@@ -22,7 +22,7 @@ export interface TelegramOptions {
   storePrefix?: string;
   apiRoot?: string;
   testEnvironment?: boolean;
-  fetch?: typeof fetch;
+  fetch?: FetchLike;
   timeoutMs?: number;
   retry?: Partial<RetryOptions>;
   pacing?: boolean | Partial<PacingLimits>;
@@ -76,7 +76,7 @@ export function createTelegram(options: TelegramOptions = {}): Telegram {
     token,
     apiRoot: options.apiRoot ?? "https://api.telegram.org",
     testEnvironment: options.testEnvironment ?? false,
-    fetch: options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
+    fetch: (input, init) => (options.fetch ?? globalThis.fetch)(input, init),
     timeoutMs,
     retry,
     pace: createPacer(pacing),

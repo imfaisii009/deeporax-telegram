@@ -21,6 +21,12 @@ export function memoryStore(): Store {
     async put(key, value, options) {
       const ttl = options?.expirationTtl;
       map.set(key, { value, expiresAt: ttl === undefined ? undefined : Date.now() + ttl * 1000 });
+      // ponytail: prune-on-put sweep is O(n) past 1000 keys; an LRU if long-running memory matters
+      if (map.size > 1000) {
+        const now = Date.now();
+        for (const [k, e] of map)
+          if (e.expiresAt !== undefined && e.expiresAt <= now) map.delete(k);
+      }
     },
     async delete(key) {
       map.delete(key);

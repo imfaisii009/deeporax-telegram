@@ -213,6 +213,7 @@ export function createTopics(deps: {
 
     async rename(chat, name, newName) {
       validate(newName);
+      if (newName === name) return;
       const id = await need(chat, name);
       await api.editForumTopic({ chat_id: chat, message_thread_id: id, name: newName });
       const old = await readEntry(chat, name);

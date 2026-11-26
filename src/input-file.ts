@@ -1,4 +1,5 @@
 import { TelegramError } from "./errors.js";
+import type { FetchLike } from "./request.js";
 
 export type InputFileData = Blob | Uint8Array | ArrayBuffer | ReadableStream<Uint8Array>;
 
@@ -18,6 +19,9 @@ export class InputFile {
 
   static fromUrl(url: string | URL, filename?: string): InputFile {
     const parsed = new URL(url);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new TypeError("InputFile.fromUrl only accepts http(s) URLs");
+    }
     const file = new InputFile(
       new Blob(),
       filename ?? (parsed.pathname.split("/").pop() || "file"),
@@ -28,7 +32,7 @@ export class InputFile {
 
   // Memoised so a retry can reuse a stream that was already consumed.
   // A failure is not cached, so a transient download error can succeed on retry.
-  toBlob(fetchFn: typeof fetch): Promise<Blob> {
+  toBlob(fetchFn: FetchLike): Promise<Blob> {
     this.#blob ??= this.#load(fetchFn).catch((e) => {
       this.#blob = undefined;
       throw e;
@@ -36,7 +40,7 @@ export class InputFile {
     return this.#blob;
   }
 
-  async #load(fetchFn: typeof fetch): Promise<Blob> {
+  async #load(fetchFn: FetchLike): Promise<Blob> {
     const src = this.#source;
     if (src instanceof Blob) return src;
     // Cast: under lib DOM, Uint8Array's ArrayBufferLike is not accepted as BlobPart.

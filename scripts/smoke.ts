@@ -11,13 +11,6 @@ import {
   type TelegramEvent,
 } from "../src/index.ts";
 
-// Declared here because @types/bun makes src/client.ts fail typecheck (its global fetch type has `preconnect`).
-declare const process: {
-  env: Record<string, string | undefined>;
-  on(event: "unhandledRejection", fn: (reason: unknown) => void): void;
-  exit(code: number): never;
-};
-
 const TOKEN = process.env.TELEGRAM_SMOKE_BOT_TOKEN ?? "";
 const CHAT_ENV = process.env.TELEGRAM_SMOKE_CHAT_ID ?? "";
 const live = /^\d+:[A-Za-z0-9_-]{30,}$/.test(TOKEN) && CHAT_ENV !== "";

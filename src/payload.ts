@@ -1,4 +1,5 @@
 import { type InputFile, isInputFile } from "./input-file.js";
+import type { FetchLike } from "./request.js";
 
 // Plain objects and arrays only: a Blob, Date or other class instance is never searched.
 function containsFile(value: unknown): boolean {
@@ -12,7 +13,7 @@ function containsFile(value: unknown): boolean {
 
 export async function buildBody(
   args: Record<string, unknown> | undefined,
-  fetchFn: typeof fetch,
+  fetchFn: FetchLike,
 ): Promise<{ body: string | FormData; headers?: Record<string, string> }> {
   if (!containsFile(args)) {
     return { body: JSON.stringify(args ?? {}), headers: { "content-type": "application/json" } };

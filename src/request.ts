@@ -22,11 +22,13 @@ export type Caller = (
   init?: CallInit,
 ) => Promise<unknown>;
 
+export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+
 export interface RequestConfig {
   token: string;
   apiRoot: string;
   testEnvironment: boolean;
-  fetch: typeof fetch;
+  fetch: FetchLike;
   timeoutMs: number;
   retry: RetryOptions;
   pace: Pacer;
@@ -53,6 +55,8 @@ export function createCaller(config: RequestConfig): Caller {
   const migrations = new Map<string, Promise<number | null>>();
 
   const resolveChat = async (chatId: unknown): Promise<unknown> => {
+    // Only basic groups migrate; supergroups/channels are <= -1e12, private chats positive.
+    if (typeof chatId !== "number" || chatId >= 0 || chatId <= -1_000_000_000_000) return chatId;
     const key = String(chatId);
     let lookup = migrations.get(key);
     if (!lookup) {
@@ -148,7 +152,7 @@ export function createCaller(config: RequestConfig): Caller {
       }
 
       const code = body.error_code ?? res.status;
-      const description = body.description ?? `HTTP ${res.status}`;
+      const description = redact(body.description ?? `HTTP ${res.status}`, token);
       const error = new TelegramError(method, code, description, body.parameters);
 
       if (code === 429 && body.parameters?.retry_after !== undefined) {

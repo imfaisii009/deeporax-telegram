@@ -95,7 +95,7 @@ export function splitHtml(markup: string, limit: number): string[] {
     }
   }
   chunks.push(cur + closeAll(stack));
-  return chunks.filter((c) => visibleLength(c) > 0);
+  return chunks.filter((c) => plain(c).trim() !== "");
 }
 
 // Escaping first makes `&`/`<` into atomic entities, so the HTML walk handles plain text unchanged.

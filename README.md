@@ -86,19 +86,22 @@ The Workers `KVNamespace` is accepted as a `store` as is. You can also write `ex
 
 ```ts
 // app/api/telegram/route.ts
+import { after } from "next/server";
 import { createTelegram } from "@deeporax/telegram";
 
+// Serverless: pass a persistent `store` (see Topics) if you send to named topics.
 const tg = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
 
 export const POST = tg.webhook({
   secret: process.env.TELEGRAM_WEBHOOK_SECRET,
+  waitUntil: (p) => after(p), // respond now, handle after the response
   onUpdate: async (update) => {
     if (update.message?.text) await tg.reply(update.message, `You said: ${update.message.text}`);
   },
 });
 ```
 
-The handler takes a standard `Request` and returns a `Response`. Next.js route handlers are called with a second argument, which the webhook ignores unless `waitUntil: true` is set.
+The handler takes a standard `Request` and returns a `Response`. Next.js passes no platform context, so `waitUntil: true` would make the handler await the update; use `waitUntil: (p) => after(p)` (from `next/server`) to respond first.
 
 ### Node
 
@@ -140,6 +143,8 @@ Deno.serve(
 
 Named forum topics are scoped per chat. `tg.send` resolves a topic name in this order: an id pinned in config, the in-memory cache, the store, then `createForumTopic` (the new id is written to the store).
 
+Topic ids live in the store. With the default in-memory store every restart or cold start creates the topic again, so on serverless pass a KV, Redis or D1 store, or pin ids.
+
 ```ts
 import { createTelegram } from "@deeporax/telegram";
 
@@ -160,11 +165,11 @@ await tg.topics.close(CHAT, "Sign-ups (prod)");
 
 `tg.topics` has `ensure`, `id` (resolve without creating), `rename`, `close`, `reopen`, `delete` and `forget` (drop from the cache and store only). Anything else, such as `editGeneralForumTopic`, is on `tg.api`.
 
-Self-healing: if a send fails because the topic was deleted, the cached id is cleared, the topic is created again and the send is retried once. If the topic is closed, it is reopened and the send is retried once.
+Self-healing applies to topics sent by name; a numeric thread id is not healed. If a send fails because the topic was deleted, the cached id is cleared, the topic is created again and the send is retried once. If the topic is closed, it is reopened and the send is retried once.
 
 Creating topics in a supergroup needs the bot to be an admin with `can_manage_topics`. The error says so when it is missing.
 
-**Cross-instance race.** The store has no compare-and-set. Two instances (for example two Worker isolates) that send to a new topic name at the same moment can each create a topic, leaving duplicates. Within one process this cannot happen. To avoid it across instances, do either of these:
+**Cross-instance race.** The store has no compare-and-set. Two instances (for example two Worker isolates) that send to a new topic name at the same moment can each create a topic, leaving duplicates. Within one client this cannot happen (caches are per client). To avoid it across instances, do either of these:
 
 - Pin the ids in `topics.ids`.
 - Call `tg.topics.ensure()` for every topic name from a deploy step or a cron trigger, so the id is already stored before real traffic arrives.
@@ -176,6 +181,7 @@ Creating topics in a supergroup needs the bot to be an admin with `can_manage_to
 ```ts
 import { createTelegram, html, code } from "@deeporax/telegram";
 
+// On serverless, pass a persistent `store` (see Topics) so topic ids survive cold starts.
 const tg = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
 const CHAT_ID = Number(process.env.TELEGRAM_CHAT_ID);
 
@@ -244,8 +250,8 @@ const parts = [
 ];
 
 const stats = kv({ Requests: "1 204", Errors: "3" }); // aligned lines in <code>
-const bars = sparkline([3, 5, 2, 8, 6]); // ▃▅▁█▆
-const bar = progress(7, 10); // █████████░ style bar, 10 cells by default
+const bars = sparkline([3, 5, 2, 8, 6]); // ▂▅▁█▆
+const bar = progress(7, 10); // ███████░░░, 10 cells by default
 const where = `${flag("GB")} ${truncate("a very long message", 10)}`;
 const stripped = plain(text); // tags removed, entities decoded
 ```
@@ -290,7 +296,7 @@ await tg.send(CHAT, {
 });
 ```
 
-`new InputFile(data, filename?)` takes a `Blob`, `Uint8Array`, `ArrayBuffer` or `ReadableStream`. `InputFile.fromUrl(url)` downloads the file and uploads it, for URLs Telegram cannot reach. Media kinds are `photo`, `document`, `video`, `audio`, `animation` and `voice`.
+`new InputFile(data, filename?)` takes a `Blob`, `Uint8Array`, `ArrayBuffer` or `ReadableStream`. `InputFile.fromUrl(url)` downloads the file and uploads it, for URLs Telegram cannot reach. Only pass URLs you trust; the file is downloaded by your server. Album captions over 1,024 characters are truncated. Media kinds are `photo`, `document`, `video`, `audio`, `animation` and `voice`.
 
 ## Webhooks and polling
 
@@ -301,7 +307,7 @@ const tg = createTelegram({ token: process.env.TELEGRAM_BOT_TOKEN });
 
 // Webhook: (request, ...rest) => Promise<Response>
 const handler = tg.webhook({
-  secret: process.env.TELEGRAM_WEBHOOK_SECRET, // [A-Za-z0-9_-], 1-256 chars
+  secret: process.env.TELEGRAM_WEBHOOK_SECRET, // [A-Za-z0-9_-], 1-256 chars; uses crypto.subtle (Node 18 needs --experimental-global-webcrypto, Node 20+ has it)
   onUpdate: async (update, tg) => {
     if (update.callback_query) await tg.answer(update.callback_query, "Done");
   },
@@ -322,11 +328,11 @@ Webhook behaviour:
 - Only POST is accepted (405 otherwise). The `X-Telegram-Bot-Api-Secret-Token` header is compared in constant time (401 on mismatch). A body that is not JSON gets 400.
 - **The handler returns 200 even when your `onUpdate` throws.** Telegram retries non-2xx responses, so a failing handler would otherwise cause a retry storm. The error goes to `onError` if you gave one, otherwise to the `error` event.
 - With no `secret`, the webhook logs a warning because anyone can post updates.
-- `waitUntil` set to `true` uses the platform context passed as a later argument (`ctx` on Workers). Passing a function uses that instead. Either way the response is sent immediately and the update is handled in the background.
+- `waitUntil` set to `true` uses the platform context passed as a later argument (`ctx` on Workers). Passing a function uses that instead. The response is sent immediately and the update is handled in the background, but only when `waitUntil` is a function or `true` with a platform context in the arguments. With `true` and no context (for example Next.js) the handler awaits the update.
 
 Polling behaviour:
 
-- **`poll().done` rejects** when a webhook is set and you did not pass `deleteWebhook: true`, or when the token is bad (401 or 404). **Attach a `.catch` to it**, or Node treats the rejection as unhandled and may exit.
+- **`poll().done` rejects** when a webhook is set and you did not pass `deleteWebhook: true`, or when the token is bad (401 or 404), or when the startup `getWebhookInfo` or `deleteWebhook` call fails. **Attach a `.catch` to it**, or Node treats the rejection as unhandled and may exit.
 - Other polling errors are emitted as `error` events and retried after a short wait.
 - `poller.stop()` or an aborted `signal` ends the loop and resolves `done`.
 - Errors thrown by `onUpdate` go to `onError` or the `error` event, as with the webhook, and do not stop the loop.
