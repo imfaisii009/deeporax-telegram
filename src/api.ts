@@ -4,9 +4,12 @@ import type { Caller, CallInit } from "./request.js";
 
 type M = ApiMethods<InputFile>;
 
-export type ApiFn<K extends keyof M> = undefined extends Parameters<M[K]>[0]
-  ? (args?: Opts<InputFile>[K], init?: CallInit) => Promise<ReturnType<M[K]>>
-  : (args: Opts<InputFile>[K], init?: CallInit) => Promise<ReturnType<M[K]>>;
+export type ApiFn<K extends keyof M> =
+  Parameters<M[K]> extends []
+    ? (args?: undefined, init?: CallInit) => Promise<ReturnType<M[K]>>
+    : undefined extends Parameters<M[K]>[0]
+      ? (args?: Opts<InputFile>[K], init?: CallInit) => Promise<ReturnType<M[K]>>
+      : (args: Opts<InputFile>[K], init?: CallInit) => Promise<ReturnType<M[K]>>;
 
 export type Api = { readonly [K in keyof M]: ApiFn<K> };
 
@@ -14,9 +17,13 @@ export function createApi(call: Caller): Api {
   const methods = new Map<string, unknown>();
   // The Proxy answers for every method name, which a mapped type can't express without a cast.
   return new Proxy({} as object, {
-    get(_target, name) {
-      // `then` stays undefined so `await tg.api` doesn't treat the proxy as a thenable.
-      if (typeof name !== "string" || name === "then") return undefined;
+    get(target, name, receiver) {
+      // Inherited members (toString, valueOf, ...) keep String(tg.api) and inspection from firing requests.
+      if (typeof name === "symbol" || name in Object.prototype) {
+        return Reflect.get(target, name, receiver);
+      }
+      // Never thenable or JSON-serialisable, so `await tg.api` and JSON.stringify don't call Telegram.
+      if (name === "then" || name === "toJSON") return undefined;
       let fn = methods.get(name);
       if (!fn) {
         fn = (args?: unknown, init?: CallInit) =>
