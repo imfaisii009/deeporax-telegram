@@ -353,7 +353,8 @@ The store holds topic ids, de-dupe keys and chat migrations. Without one, `memor
 import { Redis } from "@upstash/redis";
 import { createTelegram, type Store } from "@deeporax/telegram";
 
-const redis = Redis.fromEnv();
+// Keep values as raw strings; the default would parse stored JSON into objects.
+const redis = Redis.fromEnv({ automaticDeserialization: false });
 
 const store: Store = {
   get: async (key) => (await redis.get<string>(key)) ?? null,
@@ -395,7 +396,7 @@ export const make = (env: { DB: D1Database }) =>
 
 ### JSON file
 
-For one Node process only. Two processes writing the same file will overwrite each other.
+For one Node process only. Calls inside the process are serialised, but two processes writing the same file will overwrite each other.
 
 ```ts
 import { readFile, writeFile } from "node:fs/promises";
@@ -407,26 +408,37 @@ function fileStore(path: string): Store {
   const load = async (): Promise<Data> => {
     try {
       return JSON.parse(await readFile(path, "utf8")) as Data;
-    } catch {
-      return {};
+    } catch (error) {
+      if ((error as { code?: string }).code === "ENOENT") return {};
+      throw error; // a corrupt file must not be overwritten with an empty one
     }
   };
+  // Run every operation one after another so overlapping calls cannot lose writes.
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = queue.then(fn);
+    queue = run.catch(() => {});
+    return run;
+  };
   return {
-    async get(key) {
-      const hit = (await load())[key];
-      return hit && (hit.exp === undefined || hit.exp > Date.now()) ? hit.v : null;
-    },
-    async put(key, value, options) {
-      const data = await load();
-      const exp = options?.expirationTtl ? Date.now() + options.expirationTtl * 1000 : undefined;
-      data[key] = { v: value, exp };
-      await writeFile(path, JSON.stringify(data));
-    },
-    async delete(key) {
-      const data = await load();
-      delete data[key];
-      await writeFile(path, JSON.stringify(data));
-    },
+    get: (key) =>
+      serial(async () => {
+        const hit = (await load())[key];
+        return hit && (hit.exp === undefined || hit.exp > Date.now()) ? hit.v : null;
+      }),
+    put: (key, value, options) =>
+      serial(async () => {
+        const data = await load();
+        const exp = options?.expirationTtl ? Date.now() + options.expirationTtl * 1000 : undefined;
+        data[key] = { v: value, exp };
+        await writeFile(path, JSON.stringify(data));
+      }),
+    delete: (key) =>
+      serial(async () => {
+        const data = await load();
+        delete data[key];
+        await writeFile(path, JSON.stringify(data));
+      }),
   };
 }
 
