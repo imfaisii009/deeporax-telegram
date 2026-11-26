@@ -27,8 +27,12 @@ export class InputFile {
   }
 
   // Memoised so a retry can reuse a stream that was already consumed.
+  // A failure is not cached, so a transient download error can succeed on retry.
   toBlob(fetchFn: typeof fetch): Promise<Blob> {
-    this.#blob ??= this.#load(fetchFn);
+    this.#blob ??= this.#load(fetchFn).catch((e) => {
+      this.#blob = undefined;
+      throw e;
+    });
     return this.#blob;
   }
 
