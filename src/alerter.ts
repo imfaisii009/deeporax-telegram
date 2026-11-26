@@ -64,20 +64,18 @@ export function createAlerter<R extends string>(
         const { windowSec } = config.dedupe;
         dedupeKey = `dedupe:${String(config.chat)}:${options.key}`;
         const now = Date.now();
-        const expiresAt = memory.get(dedupeKey);
-        let hit = expiresAt !== undefined && expiresAt > now;
-        if (!hit && (await store.get(dedupeKey)) !== null) {
-          hit = true;
-          memory.set(dedupeKey, now + windowSec * 1000);
-        }
-        if (hit) {
+        const deduped = (): AlertResult => {
           emit({ type: "deduped", key: options.key });
           return { ok: false, skipped: "deduped" };
-        }
+        };
+        const expiresAt = memory.get(dedupeKey);
+        if (expiresAt !== undefined && expiresAt > now) return deduped();
+        // Claim before the first await so a concurrent same-key alert sees it.
         if (memory.size > PRUNE_AT) {
           for (const [k, exp] of memory) if (exp <= now) memory.delete(k);
         }
         memory.set(dedupeKey, now + windowSec * 1000);
+        if ((await store.get(dedupeKey)) !== null) return deduped();
         await store.put(dedupeKey, "1", windowSec);
       }
 
